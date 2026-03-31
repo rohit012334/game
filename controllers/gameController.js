@@ -41,16 +41,33 @@ export const getCurrentRound = (req, res) => {
 
 export const getHistory = async (req, res) => {
   const { userId } = req.params;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const skip = (page - 1) * limit;
+
   try {
-    const bets = await Bet.find({ userId }).sort({ timestamp: -1 }).limit(50);
-    res.json(bets.map(bet => ({
-      roundId: bet.roundId,
-      side: bet.side,
-      amount: bet.amount,
-      won: bet.won,
-      payout: bet.payout,
-      timestamp: bet.timestamp
-    })));
+    const total = await Bet.countDocuments({ userId });
+    const bets = await Bet.find({ userId })
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      data: bets.map(bet => ({
+        roundId: bet.roundId,
+        side: bet.side,
+        amount: bet.amount,
+        won: bet.won,
+        payout: bet.payout,
+        timestamp: bet.timestamp
+      })),
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
@@ -139,9 +156,26 @@ export const placeBet = async (req, res) => {
 };
 
 export const getRecentResults = async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const skip = (page - 1) * limit;
+
   try {
-    const results = await RoundResult.find().sort({ timestamp: -1 }).limit(50);
-    res.json(results);
+    const total = await RoundResult.countDocuments();
+    const results = await RoundResult.find()
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      data: results,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
