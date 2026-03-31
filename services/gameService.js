@@ -194,47 +194,68 @@ class GameService {
     let roundHousePayout = 0;
     const roundHouseRevenue = Object.values(this.currentRound.totals).reduce((a, b) => a + b, 0);
 
-    const payoutPromises = roundBets.map(async (bet) => {
-      const isWinner = bet.side === winnerName;
-      const multiplier = this.MULTIPLIERS[bet.side] || 0;
-      const payout = isWinner ? Math.floor(bet.amount * multiplier) : 0;
+    // Group bets by userId to aggregate payouts
+    const userBetsMap = new Map();
+    for (const bet of roundBets) {
+      if (!userBetsMap.has(bet.userId)) {
+        userBetsMap.set(bet.userId, []);
+      }
+      userBetsMap.get(bet.userId).push(bet);
+    }
 
-      if (isWinner) roundHousePayout += payout;
+    const userStatsPromises = Array.from(userBetsMap.entries()).map(async ([userId, bets]) => {
+      let totalPayout = 0;
+      let hasWon = false;
+      const individualResults = [];
 
-      const updateBet = Bet.findOneAndUpdate(
-        { userId: bet.userId, roundId: bet.roundId, side: bet.side },
-        { won: isWinner, payout, status: "settled" }
-      );
+      for (const bet of bets) {
+        const isWinner = bet.side === winnerName;
+        const multiplier = this.MULTIPLIERS[bet.side] || 0;
+        const payout = isWinner ? Math.floor(bet.amount * multiplier) : 0;
 
-      let updateUser = null;
-      if (isWinner && payout > 0) {
-        updateUser = User.findOneAndUpdate(
-          { userId: bet.userId },
-          { $inc: { balance: payout } }
+        if (isWinner) {
+          totalPayout += payout;
+          hasWon = true;
+          roundHousePayout += payout;
+        }
+
+        individualResults.push({ side: bet.side, amount: bet.amount, won: isWinner, payout });
+
+        // Update database for each individual bet using its unique ID
+        await Bet.findByIdAndUpdate(
+          bet._id,
+          { won: isWinner, payout, status: "settled" }
+        );
+
+        this.updateUserCache(bet.userId, {
+          amount: bet.amount,
+          side: bet.side,
+          won: isWinner,
+          roundId: rid
+        });
+      }
+
+      // Update user balance once with total payout
+      if (totalPayout > 0) {
+        await User.findOneAndUpdate(
+          { userId: userId },
+          { $inc: { balance: totalPayout } }
         );
       }
 
-      await Promise.all([updateBet, updateUser].filter(p => p !== null));
-
-      this.updateUserCache(bet.userId, {
-        amount: bet.amount,
-        side: bet.side,
-        won: isWinner,
-        roundId: rid
-      });
-
-      const socketId = this.userIdToSocket.get(bet.userId);
+      const socketId = this.userIdToSocket.get(userId);
       if (socketId && this.io) {
-        const user = await User.findOne({ userId: bet.userId }).select('balance');
+        const user = await User.findOne({ userId }).select('balance');
         this.io.to(socketId).emit('betResult', {
-          won: isWinner,
-          payout,
-          balance: user ? user.balance : 0
+          won: hasWon,
+          totalPayout,
+          balance: user ? user.balance : 0,
+          results: individualResults
         });
       }
     });
 
-    await Promise.all(payoutPromises);
+    await Promise.all(userStatsPromises);
 
     this.dailyLoss += roundHousePayout;
     this.dailyProfit += roundHouseRevenue;

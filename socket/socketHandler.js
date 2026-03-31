@@ -44,11 +44,7 @@ const socketHandler = (io) => {
         return socket.emit('error', { message: "Betting is closed" });
       }
 
-      // Check if user already bet on THIS specific fruit
-      const existingBetOnSymbol = currentRound.bets.find(b => b.userId === userId && b.side === selectedSymbol);
-      if (existingBetOnSymbol) {
-        return socket.emit('error', { message: "Already bet on this symbol" });
-      }
+      // Multiple bets per symbol are allowed, so we removed the check for existing bets.
 
       try {
         const user = await User.findOneAndUpdate(
@@ -75,6 +71,7 @@ const socketHandler = (io) => {
         };
 
         const newBet = await Bet.create(betData);
+        betData._id = newBet._id; // Include DB ID for accurate payout updates
 
         try {
           gameService.addBetToCache(betData);
