@@ -22,7 +22,7 @@ class GameService {
 
     this.currentRound = {
       roundId: uuidv4(),
-      time: 60,
+      time: 30,
       status: "betting",
       bets: [],
       totals: this.SYMBOLS.reduce((acc, symbol) => ({ ...acc, [symbol]: 0 }), {})
@@ -247,7 +247,7 @@ class GameService {
 
     this.currentRound = {
       roundId: uuidv4(),
-      time: 60,
+      time: 30,
       status: "betting",
       bets: [],
       totals: this.SYMBOLS.reduce((acc, symbol) => ({ ...acc, [symbol]: 0 }), {})
@@ -263,7 +263,7 @@ class GameService {
             roundId: this.currentRound.roundId,
             time: this.currentRound.time,
             status: this.currentRound.status,
-            newRound: this.currentRound.time === 59,
+            newRound: this.currentRound.time === 29,
             totals: this.currentRound.totals
           });
         }
