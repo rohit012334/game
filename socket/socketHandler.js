@@ -5,7 +5,7 @@ import gameService from '../services/gameService.js';
 const betTimeouts = new Map();
 const MIN_BET = 10;
 const MAX_BET = 50000;
-const normalizeUserId = (value) => String(value || '').trim();
+const normalizeUserId = (value) => String(value || '').trim().toLowerCase();
 
 const symbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
 
@@ -35,8 +35,8 @@ const socketHandler = (io) => {
       if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
         throw new Error("Invalid amount");
       }
-      if (parsedAmount < MIN_BET) return socket.emit('error', { message: `Minimum bet ₹10 for ${selectedSymbol || 'fruit'}` });
-      if (parsedAmount > MAX_BET) return socket.emit('error', { message: `Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}` });
+      if (parsedAmount < MIN_BET) throw new Error(`Minimum bet ₹10 for ${selectedSymbol || 'fruit'}`);
+      if (parsedAmount > MAX_BET) throw new Error(`Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}`);
 
       const currentRound = gameService.getCurrentRound();
       gameService.setSocketMapping(userId, socket.id);
@@ -96,7 +96,7 @@ const socketHandler = (io) => {
     socket.on('bet', async (data) => {
       const now = Date.now();
       const lastBet = betTimeouts.get(socket.id);
-      if (lastBet && now - lastBet < 500) { // Reduced to 500ms for better UX when sending batches
+      if (lastBet && now - lastBet < 500) {
         return socket.emit('error', { message: "Too many requests" });
       }
       betTimeouts.set(socket.id, now);
@@ -109,7 +109,7 @@ const socketHandler = (io) => {
             const result = await processSingleBet(b);
             socket.emit('betConfirmed', result);
           } catch (err) {
-            socket.emit('error', { message: err.message, fruit: b.side || b.fruit });
+            socket.emit('betError', { message: err.message, fruit: b.side || b.fruit });
           }
         }
       } catch (err) {
@@ -129,7 +129,6 @@ const socketHandler = (io) => {
   });
 };
 
-// Broadcast Online Count every 5 seconds
 setInterval(() => {
   if (global.ioInstance) {
     global.ioInstance.emit('ONLINE_COUNT', { type: "ONLINE_COUNT", data: gameService.onlineCount });

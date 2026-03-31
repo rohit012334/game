@@ -6,7 +6,7 @@ import gameService from '../services/gameService.js';
 const MIN_BET = 10;
 const MAX_BET = 50000;
 
-const normalizeUserId = (value) => String(value || '').trim();
+const normalizeUserId = (value) => String(value || '').trim().toLowerCase();
 
 export const getWallet = async (req, res) => {
   const userId = normalizeUserId(req.params.userId);
@@ -56,7 +56,6 @@ export const getHistory = async (req, res) => {
   if (statusFilter === "pending" || statusFilter === "settled") {
     query.status = statusFilter;
   } else {
-    // Default to settled bets so pending entries are not misread as losses.
     query.status = "settled";
   }
 
@@ -69,7 +68,6 @@ export const getHistory = async (req, res) => {
 
     res.json({
       data: bets.map(bet => ({
-        // Keep raw settlement state separately for debugging/backoffice use.
         settlementStatus: bet.status,
         roundId: bet.roundId,
         side: bet.side,
@@ -82,7 +80,6 @@ export const getHistory = async (req, res) => {
         result: bet.status === "settled"
           ? (bet.won ? "win" : "loss")
           : "pending",
-        // Backward-friendly status for frontends that directly bind status label.
         status: bet.status === "settled"
           ? (bet.won ? "win" : "loss")
           : "pending",
@@ -179,7 +176,14 @@ export const placeBet = async (req, res) => {
       }
     }
 
-    res.json({ success: true, results });
+    const anySucceeded = results.some(r => r.success);
+    const allFailed = results.every(r => !r.success);
+
+    if (allFailed && betsToProcess.length > 0) {
+      return res.status(400).json({ success: false, results });
+    }
+
+    res.json({ success: anySucceeded, results });
   } catch (err) {
     console.error("HTTP Bet error:", err);
     res.status(500).json({ success: false, message: "Server error" });

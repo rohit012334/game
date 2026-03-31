@@ -24,5 +24,5 @@ gameService.setIO(io);
 socketHandler(io);
 
 server.listen(PORT, () => {
-  console.log(`🚀 Server running in production mode on port ${PORT}`);
+  console.log(` Server running in production mode on port ${PORT}`);
 });

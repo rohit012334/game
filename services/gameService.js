@@ -9,14 +9,14 @@ class GameService {
   constructor() {
     this.SYMBOLS = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
     this.MULTIPLIERS = {
-      "grape": 28,
-      "watermelon": 5,
-      "orange": 5,
+      "grape": 20,
+      "watermelon": 3,
+      "orange": 2,
       "lemon": 5,
-      "apple": 10,
-      "banana": 5,
+      "apple": 9,
+      "banana": 2,
       "cherry": 18,
-      "pineapple": 5,
+      "pineapple": 3,
       "mango": 38
     };
 
@@ -194,8 +194,8 @@ class GameService {
 
     let roundHousePayout = 0;
     const roundHouseRevenue = Object.values(this.currentRound.totals).reduce((a, b) => a + b, 0);
+    const isJackpotRound = winnerName === "mango";
 
-    // Group bets by userId to aggregate payouts
     const userBetsMap = new Map();
     for (const bet of roundBets) {
       if (!userBetsMap.has(bet.userId)) {
@@ -208,11 +208,17 @@ class GameService {
       let totalPayout = 0;
       let hasWon = false;
       const individualResults = [];
+      const betUpdates = [];
 
+      // Step 1: Calculate everything in memory (FAST)
       for (const bet of bets) {
         const isWinner = bet.side === winnerName;
         const multiplier = this.MULTIPLIERS[bet.side] || 0;
-        const payout = isWinner ? Math.floor(bet.amount * multiplier) : 0;
+        let payout = isWinner ? Math.floor(bet.amount * multiplier) : 0;
+
+        if (isWinner && isJackpotRound) {
+          payout += 5000;
+        }
 
         if (isWinner) {
           totalPayout += payout;
@@ -221,13 +227,9 @@ class GameService {
         }
 
         individualResults.push({ side: bet.side, amount: bet.amount, won: isWinner, payout });
+        betUpdates.push({ id: bet._id, won: isWinner, payout });
 
-        // Update database for each individual bet using its unique ID
-        await Bet.findByIdAndUpdate(
-          bet._id,
-          { won: isWinner, payout, status: "settled" }
-        );
-
+        // Optimistic cache update
         this.updateUserCache(bet.userId, {
           amount: bet.amount,
           side: bet.side,
@@ -236,23 +238,32 @@ class GameService {
         });
       }
 
-      // Update user balance once with total payout
+      // Step 2: Update Balance FIRST (PRIORITY)
+      let updatedUser = null;
       if (totalPayout > 0) {
-        await User.findOneAndUpdate(
+        updatedUser = await User.findOneAndUpdate(
           { userId: userId },
-          { $inc: { balance: totalPayout } }
+          { $inc: { balance: totalPayout } },
+          { new: true, lean: true }
         );
+      } else {
+        updatedUser = await User.findOne({ userId }).select('balance').lean();
       }
 
+      // Step 3: Emit to User IMMEDIATELY
       const socketId = this.userIdToSocket.get(userId);
       if (socketId && this.io) {
-        const user = await User.findOne({ userId }).select('balance');
         this.io.to(socketId).emit('betResult', {
           won: hasWon,
           totalPayout,
-          balance: user ? user.balance : 0,
+          balance: updatedUser ? updatedUser.balance : 0,
           results: individualResults
         });
+      }
+
+      // Step 4: Update Bet documents in background (Non-blocking)
+      for (const b of betUpdates) {
+        Bet.findByIdAndUpdate(b.id, { won: b.won, payout: b.payout, status: "settled" }).catch(() => { });
       }
     });
 
