@@ -3,6 +3,9 @@ import Bet from '../models/Bet.js';
 import gameService from '../services/gameService.js';
 
 const betTimeouts = new Map();
+const MIN_BET = 10;
+const MAX_BET = 50000;
+const normalizeUserId = (value) => String(value || '').trim();
 
 const symbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
 
@@ -10,18 +13,30 @@ const socketHandler = (io) => {
   io.on('connection', (socket) => {
     gameService.onlineCount++;
     console.log("🤝 User connected:", socket.id, "| Online:", gameService.onlineCount);
+    const currentRound = gameService.getCurrentRound();
+    socket.emit('round', {
+      roundId: currentRound.roundId,
+      time: currentRound.time,
+      status: currentRound.status,
+      newRound: false,
+      totals: currentRound.totals
+    });
 
     const processSingleBet = async (betItem) => {
-      const { userId, roundId, side, fruit, amount } = betItem;
+      const userId = normalizeUserId(betItem.userId);
+      const { roundId, side, fruit, amount } = betItem;
       const selectedSymbol = side || fruit;
       const now = Date.now();
 
+      if (!userId) {
+        throw new Error("userId required");
+      }
       const parsedAmount = Math.floor(parseInt(amount));
       if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
         throw new Error("Invalid amount");
       }
-      if (parsedAmount < 10) return socket.emit('error', { message: `Minimum bet ₹10 for ${selectedSymbol || 'fruit'}` });
-      if (parsedAmount > 50000) return socket.emit('error', { message: `Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}` });
+      if (parsedAmount < MIN_BET) return socket.emit('error', { message: `Minimum bet ₹10 for ${selectedSymbol || 'fruit'}` });
+      if (parsedAmount > MAX_BET) return socket.emit('error', { message: `Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}` });
 
       const currentRound = gameService.getCurrentRound();
       gameService.setSocketMapping(userId, socket.id);
@@ -33,7 +48,7 @@ const socketHandler = (io) => {
       if (currentRound.roundId !== roundId) {
         throw new Error("Round expired");
       }
-      if (currentRound.status !== "betting" || currentRound.time <= 3) {
+      if (currentRound.status !== "betting" || currentRound.time <= 1) {
         throw new Error("Betting is closed");
       }
 

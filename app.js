@@ -5,6 +5,8 @@ import apiRoutes from './routes/route.js';
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use(express.json());
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {

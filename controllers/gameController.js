@@ -3,8 +3,14 @@ import Bet from '../models/Bet.js';
 import RoundResult from '../models/RoundResult.js';
 import gameService from '../services/gameService.js';
 
+const MIN_BET = 10;
+const MAX_BET = 50000;
+
+const normalizeUserId = (value) => String(value || '').trim();
+
 export const getWallet = async (req, res) => {
-  const { userId } = req.params;
+  const userId = normalizeUserId(req.params.userId);
+  if (!userId) return res.status(400).json({ error: "userId required" });
   try {
     const user = await User.findOne({ userId });
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -15,7 +21,7 @@ export const getWallet = async (req, res) => {
 };
 
 export const register = async (req, res) => {
-  const { userId } = req.body;
+  const userId = normalizeUserId(req.body.userId);
   if (!userId) return res.status(400).json({ error: "userId required" });
   try {
     let user = await User.findOne({ userId });
@@ -40,15 +46,24 @@ export const getCurrentRound = (req, res) => {
 };
 
 export const getHistory = async (req, res) => {
-  const { userId } = req.params;
+  const userId = normalizeUserId(req.params.userId);
+  if (!userId) return res.status(400).json({ error: "userId required" });
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 20;
   const skip = (page - 1) * limit;
+  const statusFilter = req.query.status;
+  const query = { userId };
+  if (statusFilter === "pending" || statusFilter === "settled") {
+    query.status = statusFilter;
+  } else {
+    // Default to settled bets so pending entries are not misread as losses.
+    query.status = "settled";
+  }
 
   try {
-    const total = await Bet.countDocuments({ userId });
-    const bets = await Bet.find({ userId })
-      .sort({ timestamp: -1 })
+    const total = await Bet.countDocuments(query);
+    const bets = await Bet.find(query)
+      .sort({ createdAt: -1, timestamp: -1 })
       .skip(skip)
       .limit(limit);
 
@@ -57,8 +72,9 @@ export const getHistory = async (req, res) => {
         roundId: bet.roundId,
         side: bet.side,
         amount: bet.amount,
-        won: bet.won,
+        won: bet.status === "settled" ? bet.won : null,
         payout: bet.payout,
+        status: bet.status,
         timestamp: bet.timestamp
       })),
       pagination: {
@@ -74,15 +90,19 @@ export const getHistory = async (req, res) => {
 };
 
 const processSingleBetREST = async (betItem) => {
-  const { userId, roundId, side, amount } = betItem;
+  const userId = normalizeUserId(betItem.userId);
+  const { roundId, side, amount } = betItem;
   const selectedSymbol = side;
   const parsedAmount = Math.floor(parseInt(amount));
 
+  if (!userId) {
+    throw new Error("userId required");
+  }
   if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
     throw new Error("Invalid amount");
   }
-  if (parsedAmount < 10) throw new Error("Minimum bet ₹10");
-  if (parsedAmount > 50000) throw new Error("Maximum bet ₹50,000");
+  if (parsedAmount < MIN_BET) throw new Error("Minimum bet ₹10");
+  if (parsedAmount > MAX_BET) throw new Error("Maximum bet ₹50,000");
 
   const currentRound = gameService.getCurrentRound();
   const validSymbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
@@ -93,7 +113,7 @@ const processSingleBetREST = async (betItem) => {
   if (roundId !== currentRound.roundId) {
     throw new Error("Round expired");
   }
-  if (currentRound.status !== "betting" || currentRound.time <= 3) {
+  if (currentRound.status !== "betting" || currentRound.time <= 1) {
     throw new Error("Betting is closed");
   }
 

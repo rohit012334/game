@@ -31,6 +31,7 @@ class GameService {
     this.userIdToSocket = new Map();
     this.userLastBets = new Map();
     this.onlineCount = 0;
+    this.isProcessingRoundEnd = false;
 
     this.EXPOSURE_LIMIT_PER_ROUND = 500000;
     this.DAILY_MAX_LOSS_LIMIT = 500000;
@@ -276,20 +277,26 @@ class GameService {
   }
 
   startTimer() {
-    setInterval(async () => {
+    setInterval(() => {
       if (this.currentRound.time > 0) {
         this.currentRound.time--;
-        if (this.io) {
-          this.io.emit('round', {
-            roundId: this.currentRound.roundId,
-            time: this.currentRound.time,
-            status: this.currentRound.status,
-            newRound: this.currentRound.time === 29,
-            totals: this.currentRound.totals
+      } else if (this.currentRound.status === "betting" && !this.isProcessingRoundEnd) {
+        this.isProcessingRoundEnd = true;
+        this.processRoundEnd()
+          .catch((err) => console.error("Round processing error:", err))
+          .finally(() => {
+            this.isProcessingRoundEnd = false;
           });
-        }
-      } else if (this.currentRound.status === "betting") {
-        await this.processRoundEnd();
+      }
+
+      if (this.io) {
+        this.io.emit('round', {
+          roundId: this.currentRound.roundId,
+          time: this.currentRound.time,
+          status: this.currentRound.status,
+          newRound: this.currentRound.time === 29,
+          totals: this.currentRound.totals
+        });
       }
     }, 1000);
   }
@@ -298,7 +305,7 @@ class GameService {
 
   addBetToCache(bet) {
     if (this.currentRound.status !== "betting") throw new Error("Betting is closed");
-    if (this.currentRound.time <= 3) throw new Error("Too late to bet");
+    if (this.currentRound.time <= 1) throw new Error("Too late to bet");
 
     const sideIndex = this.SYMBOLS.indexOf(bet.side);
     if (sideIndex === -1) throw new Error("Invalid symbol selected");
