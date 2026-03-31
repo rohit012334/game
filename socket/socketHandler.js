@@ -11,85 +11,94 @@ const socketHandler = (io) => {
     gameService.onlineCount++;
     console.log("🤝 User connected:", socket.id, "| Online:", gameService.onlineCount);
 
-    socket.on('bet', async (data) => {
-      const { userId, roundId, side, fruit, amount } = data;
+    const processSingleBet = async (betItem) => {
+      const { userId, roundId, side, fruit, amount } = betItem;
       const selectedSymbol = side || fruit;
-
       const now = Date.now();
-      const lastBet = betTimeouts.get(socket.id);
-      if (lastBet && now - lastBet < 1000) {
-        return socket.emit('error', { message: "Too many requests. Please wait 1 second." });
-      }
-      betTimeouts.set(socket.id, now);
 
       const parsedAmount = Math.floor(parseInt(amount));
       if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
-        return socket.emit('error', { message: "Invalid amount" });
+        throw new Error("Invalid amount");
       }
-
-      if (parsedAmount < 100) return socket.emit('error', { message: "Minimum bet ₹100" });
-      if (parsedAmount > 50000) return socket.emit('error', { message: "Maximum bet ₹50,000" });
+      if (parsedAmount < 100) throw new Error(`Minimum bet ₹100 for ${selectedSymbol || 'fruit'}`);
+      if (parsedAmount > 50000) throw new Error(`Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}`);
 
       const currentRound = gameService.getCurrentRound();
       gameService.setSocketMapping(userId, socket.id);
       socket.userId = userId;
 
       if (!symbols.includes(selectedSymbol)) {
-        return socket.emit('error', { message: "Invalid symbol selection" });
+        throw new Error(`Invalid symbol selection: ${selectedSymbol}`);
       }
       if (currentRound.roundId !== roundId) {
-        return socket.emit('error', { message: "Round expired" });
+        throw new Error("Round expired");
       }
       if (currentRound.status !== "betting" || currentRound.time <= 3) {
-        return socket.emit('error', { message: "Betting is closed" });
+        throw new Error("Betting is closed");
       }
 
-      // Multiple bets per symbol are allowed, so we removed the check for existing bets.
+      const user = await User.findOneAndUpdate(
+        { userId, balance: { $gte: parsedAmount } },
+        { $inc: { balance: -parsedAmount } },
+        { new: true }
+      );
+
+      if (!user) {
+        throw new Error(`Insufficient balance or user not found for ${selectedSymbol}`);
+      }
+
+      const symbolIndex = symbols.indexOf(selectedSymbol);
+      const betData = {
+        userId,
+        roundId,
+        side: selectedSymbol,
+        sideIndex: symbolIndex,
+        amount: parsedAmount,
+        timestamp: now,
+        won: false,
+        payout: 0,
+        status: "pending"
+      };
+
+      const newBet = await Bet.create(betData);
+      betData._id = newBet._id;
 
       try {
-        const user = await User.findOneAndUpdate(
-          { userId, balance: { $gte: parsedAmount } },
-          { $inc: { balance: -parsedAmount } },
-          { new: true }
-        );
-
-        if (!user) {
-          return socket.emit('error', { message: "Insufficient balance or user not found" });
-        }
-
-        const symbolIndex = symbols.indexOf(selectedSymbol);
-        const betData = {
-          userId,
-          roundId,
-          side: selectedSymbol,
-          sideIndex: symbolIndex,
-          amount: parsedAmount,
-          timestamp: now,
-          won: false,
-          payout: 0,
-          status: "pending"
-        };
-
-        const newBet = await Bet.create(betData);
-        betData._id = newBet._id; // Include DB ID for accurate payout updates
-
-        try {
-          gameService.addBetToCache(betData);
-        } catch (cacheErr) {
-          await User.findOneAndUpdate({ userId }, { $inc: { balance: parsedAmount } });
-          await Bet.deleteOne({ _id: newBet._id });
-          return socket.emit('error', { message: cacheErr.message });
-        }
-
-        socket.emit('betConfirmed', {
+        gameService.addBetToCache(betData);
+        return {
           message: "Bet placed!",
           balance: user.balance,
           side: selectedSymbol,
           amount: parsedAmount
-        });
+        };
+      } catch (cacheErr) {
+        await User.findOneAndUpdate({ userId }, { $inc: { balance: parsedAmount } });
+        await Bet.deleteOne({ _id: newBet._id });
+        throw cacheErr;
+      }
+    };
 
+    socket.on('bet', async (data) => {
+      const now = Date.now();
+      const lastBet = betTimeouts.get(socket.id);
+      if (lastBet && now - lastBet < 500) { // Reduced to 500ms for better UX when sending batches
+        return socket.emit('error', { message: "Too many requests" });
+      }
+      betTimeouts.set(socket.id, now);
+
+      try {
+        const betsToProcess = Array.isArray(data) ? data : [data];
+        
+        for (const b of betsToProcess) {
+          try {
+            const result = await processSingleBet(b);
+            socket.emit('betConfirmed', result);
+          } catch (err) {
+            socket.emit('error', { message: err.message, fruit: b.side || b.fruit });
+          }
+        }
       } catch (err) {
-        console.error("Bet error:", err);
+        console.error("Batch bet error:", err);
         socket.emit('error', { message: "Server error" });
       }
     });

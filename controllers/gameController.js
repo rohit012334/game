@@ -82,11 +82,7 @@ export const placeBet = async (req, res) => {
     return res.status(400).json({ success: false, message: "Betting is closed" });
   }
 
-  // Check if user already bet on THIS specific symbol (allowing bets on other symbols)
-  const existingBetOnSymbol = currentRound.bets.find(b => b.userId === userId && b.side === selectedSymbol);
-  if (existingBetOnSymbol) {
-    return res.status(400).json({ success: false, message: "Already bet on this symbol" });
-  }
+  // Multiple bets per symbol are allowed, so we removed the check for existing bets.
 
   try {
     const user = await User.findOneAndUpdate(
