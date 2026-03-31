@@ -56,73 +56,84 @@ export const getHistory = async (req, res) => {
   }
 };
 
-export const placeBet = async (req, res) => {
-  const { userId, roundId, side, amount } = req.body;
+const processSingleBetREST = async (betItem) => {
+  const { userId, roundId, side, amount } = betItem;
   const selectedSymbol = side;
   const parsedAmount = Math.floor(parseInt(amount));
 
   if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
-    return res.status(400).json({ success: false, message: "Invalid amount" });
+    throw new Error("Invalid amount");
   }
-
-  if (parsedAmount < 10) return res.status(400).json({ success: false, message: "Minimum bet ₹10" });
-  if (parsedAmount > 50000) return res.status(400).json({ success: false, message: "Maximum bet ₹50,000" });
+  if (parsedAmount < 10) throw new Error("Minimum bet ₹10");
+  if (parsedAmount > 50000) throw new Error("Maximum bet ₹50,000");
 
   const currentRound = gameService.getCurrentRound();
   const validSymbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
 
   if (!selectedSymbol || !validSymbols.includes(selectedSymbol)) {
-    return res.status(400).json({ success: false, message: "Invalid symbol selection" });
+    throw new Error("Invalid symbol selection");
   }
-
   if (roundId !== currentRound.roundId) {
-    return res.status(400).json({ success: false, message: "Round expired" });
+    throw new Error("Round expired");
   }
   if (currentRound.status !== "betting" || currentRound.time <= 3) {
-    return res.status(400).json({ success: false, message: "Betting is closed" });
+    throw new Error("Betting is closed");
   }
 
-  // Multiple bets per symbol are allowed, so we removed the check for existing bets.
+  const user = await User.findOneAndUpdate(
+    { userId, balance: { $gte: parsedAmount } },
+    { $inc: { balance: -parsedAmount } },
+    { new: true }
+  );
+
+  if (!user) {
+    throw new Error(`Insufficient balance for ${selectedSymbol}`);
+  }
+
+  const symbolIndex = validSymbols.indexOf(selectedSymbol);
+  const betData = {
+    userId,
+    roundId,
+    side: selectedSymbol,
+    sideIndex: symbolIndex,
+    amount: parsedAmount,
+    timestamp: Date.now(),
+    won: false,
+    payout: 0,
+    status: "pending"
+  };
+
+  const newBet = await Bet.create(betData);
+  betData._id = newBet._id;
 
   try {
-    const user = await User.findOneAndUpdate(
-      { userId, balance: { $gte: parsedAmount } },
-      { $inc: { balance: -parsedAmount } },
-      { new: true }
-    );
+    gameService.addBetToCache(betData);
+    return { success: true, message: "Bet placed!", balance: user.balance, side: selectedSymbol };
+  } catch (cacheErr) {
+    await User.findOneAndUpdate({ userId }, { $inc: { balance: parsedAmount } });
+    await Bet.deleteOne({ _id: newBet._id });
+    throw cacheErr;
+  }
+};
 
-    if (!user) {
-      return res.status(400).json({ success: false, message: "Insufficient balance or user not found" });
+export const placeBet = async (req, res) => {
+  try {
+    const data = req.body;
+    const betsToProcess = Array.isArray(data) ? data : [data];
+    const results = [];
+
+    for (const b of betsToProcess) {
+      try {
+        const resObj = await processSingleBetREST(b);
+        results.push(resObj);
+      } catch (err) {
+        results.push({ success: false, message: err.message, side: b.side });
+      }
     }
 
-    const symbolIndex = validSymbols.indexOf(selectedSymbol);
-    const betData = {
-      userId,
-      roundId,
-      side: selectedSymbol,
-      sideIndex: symbolIndex,
-      amount: parsedAmount,
-      timestamp: Date.now(),
-      won: false,
-      payout: 0,
-      status: "pending"
-    };
-
-    const newBet = await Bet.create(betData);
-
-    try {
-      gameService.addBetToCache(betData);
-    } catch (cacheErr) {
-      // Revert if cache add fails (e.g. exposure limit)
-      await User.findOneAndUpdate({ userId }, { $inc: { balance: parsedAmount } });
-      await Bet.deleteOne({ _id: newBet._id });
-      return res.status(400).json({ success: false, message: cacheErr.message });
-    }
-
-    res.json({ success: true, message: "Bet placed!", balance: user.balance });
-
+    res.json({ success: true, results });
   } catch (err) {
-    console.error("Bet error:", err);
+    console.error("HTTP Bet error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
