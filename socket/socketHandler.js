@@ -20,8 +20,8 @@ const socketHandler = (io) => {
       if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
         throw new Error("Invalid amount");
       }
-      if (parsedAmount < 100) throw new Error(`Minimum bet ₹100 for ${selectedSymbol || 'fruit'}`);
-      if (parsedAmount > 50000) throw new Error(`Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}`);
+      if (parsedAmount < 10) return socket.emit('error', { message: `Minimum bet ₹10 for ${selectedSymbol || 'fruit'}` });
+      if (parsedAmount > 50000) return socket.emit('error', { message: `Maximum bet ₹50,000 for ${selectedSymbol || 'fruit'}` });
 
       const currentRound = gameService.getCurrentRound();
       gameService.setSocketMapping(userId, socket.id);
@@ -88,7 +88,7 @@ const socketHandler = (io) => {
 
       try {
         const betsToProcess = Array.isArray(data) ? data : [data];
-        
+
         for (const b of betsToProcess) {
           try {
             const result = await processSingleBet(b);
