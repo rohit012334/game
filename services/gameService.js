@@ -34,7 +34,7 @@ class GameService {
 
     this.EXPOSURE_LIMIT_PER_ROUND = 500000;
     this.DAILY_MAX_LOSS_LIMIT = 500000;
-    this.HOUSE_EDGE_THRESHOLD = 3000;
+    this.HOUSE_EDGE_THRESHOLD = 10000;
 
     this.dailyLoss = 0;
     this.dailyProfit = 0;
@@ -179,7 +179,6 @@ class GameService {
         message
       });
 
-      // Emit Jackpot if Mango wins (highest multiplier)
       if (winnerName === "mango") {
         this.io.emit('JACKPOT', {
           type: "JACKPOT",

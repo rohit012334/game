@@ -27,7 +27,7 @@ const socketHandler = (io) => {
         return socket.emit('error', { message: "Invalid amount" });
       }
 
-      if (parsedAmount < 10) return socket.emit('error', { message: "Minimum bet ₹10" });
+      if (parsedAmount < 100) return socket.emit('error', { message: "Minimum bet ₹100" });
       if (parsedAmount > 50000) return socket.emit('error', { message: "Maximum bet ₹50,000" });
 
       const currentRound = gameService.getCurrentRound();
@@ -62,12 +62,12 @@ const socketHandler = (io) => {
         }
 
         const symbolIndex = symbols.indexOf(selectedSymbol);
-        const betData = { 
-          userId, 
-          roundId, 
-          side: selectedSymbol, 
+        const betData = {
+          userId,
+          roundId,
+          side: selectedSymbol,
           sideIndex: symbolIndex,
-          amount: parsedAmount, 
+          amount: parsedAmount,
           timestamp: now,
           won: false,
           payout: 0,
