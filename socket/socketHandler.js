@@ -40,7 +40,7 @@ const socketHandler = (io) => {
       const user = await User.findOneAndUpdate(
         { userId, balance: { $gte: parsedAmount } },
         { $inc: { balance: -parsedAmount } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       if (!user) {

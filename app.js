@@ -15,7 +15,7 @@ app.use((err, req, res, next) => {
 
 app.use(cors());
 
-app.use(globalLimiter);
+// app.use(globalLimiter); // Removed to allow frequent polling of game status
 
 app.use('/', apiRoutes);
 
