@@ -69,12 +69,23 @@ export const getHistory = async (req, res) => {
 
     res.json({
       data: bets.map(bet => ({
+        // Keep raw settlement state separately for debugging/backoffice use.
+        settlementStatus: bet.status,
         roundId: bet.roundId,
         side: bet.side,
         amount: bet.amount,
         won: bet.status === "settled" ? bet.won : null,
+        win: bet.status === "settled" ? bet.won : null,
+        isWin: bet.status === "settled" ? bet.won : null,
         payout: bet.payout,
-        status: bet.status,
+        net: bet.status === "settled" ? (bet.payout - bet.amount) : 0,
+        result: bet.status === "settled"
+          ? (bet.won ? "win" : "loss")
+          : "pending",
+        // Backward-friendly status for frontends that directly bind status label.
+        status: bet.status === "settled"
+          ? (bet.won ? "win" : "loss")
+          : "pending",
         timestamp: bet.timestamp
       })),
       pagination: {
