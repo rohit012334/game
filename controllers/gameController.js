@@ -6,34 +6,22 @@ import gameService from '../services/gameService.js';
 const MIN_BET = 10;
 const MAX_BET = 50000;
 
-const normalizeUserId = (value) => String(value || '').trim().toLowerCase();
+// ✅ normalizeUserId HATAO — firebaseUid case-sensitive hota hai
+// userId param = firebaseUid (Flutter se aayega)
 
 export const getWallet = async (req, res) => {
-  const userId = normalizeUserId(req.params.userId);
+  const { userId } = req.params; // firebaseUid
   if (!userId) return res.status(400).json({ error: "userId required" });
   try {
-    const user = await User.findOne({ userId });
+    const user = await User.findOne({ firebaseUid: userId }).select('coin uniqueId name');
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({ balance: user.balance });
+    res.json({ coin: user.coin }); // ✅ coin
   } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
 };
 
-export const register = async (req, res) => {
-  const userId = normalizeUserId(req.body.userId);
-  if (!userId) return res.status(400).json({ error: "userId required" });
-  try {
-    let user = await User.findOne({ userId });
-    if (user) return res.status(400).json({ error: "User already exists" });
-    user = new User({ userId, balance: 1000 });
-    await user.save();
-    res.json({ status: "ok", balance: user.balance });
-  } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ error: "User already exists" });
-    res.status(500).json({ error: "Server error" });
-  }
-};
+// ❌ register REMOVED — WePlayChat handle karta hai
 
 export const getCurrentRound = (req, res) => {
   const round = gameService.getCurrentRound();
@@ -46,12 +34,14 @@ export const getCurrentRound = (req, res) => {
 };
 
 export const getHistory = async (req, res) => {
-  const userId = normalizeUserId(req.params.userId);
+  const { userId } = req.params; // firebaseUid
   if (!userId) return res.status(400).json({ error: "userId required" });
+
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 20;
   const skip = (page - 1) * limit;
   const statusFilter = req.query.status;
+
   const query = { userId };
   if (statusFilter === "pending" || statusFilter === "settled") {
     query.status = statusFilter;
@@ -77,20 +67,11 @@ export const getHistory = async (req, res) => {
         isWin: bet.status === "settled" ? bet.won : null,
         payout: bet.payout,
         net: bet.status === "settled" ? (bet.payout - bet.amount) : 0,
-        result: bet.status === "settled"
-          ? (bet.won ? "win" : "loss")
-          : "pending",
-        status: bet.status === "settled"
-          ? (bet.won ? "win" : "loss")
-          : "pending",
+        result: bet.status === "settled" ? (bet.won ? "win" : "loss") : "pending",
+        status: bet.status === "settled" ? (bet.won ? "win" : "loss") : "pending",
         timestamp: bet.timestamp
       })),
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
     });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
@@ -98,46 +79,39 @@ export const getHistory = async (req, res) => {
 };
 
 const processSingleBetREST = async (betItem) => {
-  const userId = normalizeUserId(betItem.userId);
+  const userId = betItem.userId; // firebaseUid as-is
   const { roundId, side, amount } = betItem;
   const selectedSymbol = side;
   const parsedAmount = Math.floor(parseInt(amount));
 
-  if (!userId) {
-    throw new Error("userId required");
-  }
-  if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
-    throw new Error("Invalid amount");
-  }
-  if (parsedAmount < MIN_BET) throw new Error("Minimum bet ₹10");
-  if (parsedAmount > MAX_BET) throw new Error("Maximum bet ₹50,000");
+  if (!userId) throw new Error("userId required");
+  if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) throw new Error("Invalid amount");
+  if (parsedAmount < MIN_BET) throw new Error("Minimum bet 10 coins");
+  if (parsedAmount > MAX_BET) throw new Error("Maximum bet 50,000 coins");
 
   const currentRound = gameService.getCurrentRound();
   const validSymbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
 
-  if (!selectedSymbol || !validSymbols.includes(selectedSymbol)) {
-    throw new Error("Invalid symbol selection");
-  }
-  if (roundId !== currentRound.roundId) {
-    throw new Error("Round expired");
-  }
-  if (currentRound.status !== "betting" || currentRound.time <= 1) {
-    throw new Error("Betting is closed");
-  }
+  if (!selectedSymbol || !validSymbols.includes(selectedSymbol)) throw new Error("Invalid symbol selection");
+  if (roundId !== currentRound.roundId) throw new Error("Round expired");
+  if (currentRound.status !== "betting" || currentRound.time <= 1) throw new Error("Betting is closed");
 
+  // ✅ WePlayChat User collection se coin deduct
   const user = await User.findOneAndUpdate(
-    { userId, balance: { $gte: parsedAmount } },
-    { $inc: { balance: -parsedAmount } },
+    {
+      firebaseUid: userId,
+      coin: { $gte: parsedAmount },
+      isBlock: false              // ✅ Blocked user check
+    },
+    { $inc: { coin: -parsedAmount } },
     { returnDocument: 'after' }
   );
 
-  if (!user) {
-    throw new Error(`Insufficient balance for ${selectedSymbol}`);
-  }
+  if (!user) throw new Error(`Insufficient coins or user not found for ${selectedSymbol}`);
 
   const symbolIndex = validSymbols.indexOf(selectedSymbol);
   const betData = {
-    userId,
+    userId,                       // firebaseUid store hoga Bet mein
     roundId,
     side: selectedSymbol,
     sideIndex: symbolIndex,
@@ -153,9 +127,15 @@ const processSingleBetREST = async (betItem) => {
 
   try {
     gameService.addBetToCache(betData);
-    return { success: true, message: "Bet placed!", balance: user.balance, side: selectedSymbol };
+    return {
+      success: true,
+      message: "Bet placed!",
+      coin: user.coin,            // ✅ coin
+      side: selectedSymbol
+    };
   } catch (cacheErr) {
-    await User.findOneAndUpdate({ userId }, { $inc: { balance: parsedAmount } });
+    // Rollback
+    await User.findOneAndUpdate({ firebaseUid: userId }, { $inc: { coin: parsedAmount } });
     await Bet.deleteOne({ _id: newBet._id });
     throw cacheErr;
   }
@@ -176,14 +156,11 @@ export const placeBet = async (req, res) => {
       }
     }
 
-    const anySucceeded = results.some(r => r.success);
     const allFailed = results.every(r => !r.success);
-
-    if (allFailed && betsToProcess.length > 0) {
+    if (allFailed) {
       return res.status(400).json({ success: false, results });
     }
-
-    res.json({ success: anySucceeded, results });
+    res.json({ success: true, results });
   } catch (err) {
     console.error("HTTP Bet error:", err);
     res.status(500).json({ success: false, message: "Server error" });
@@ -204,12 +181,7 @@ export const getRecentResults = async (req, res) => {
 
     res.json({
       data: results,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
     });
   } catch (err) {
     res.status(500).json({ error: "Server error" });

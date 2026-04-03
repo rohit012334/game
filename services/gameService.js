@@ -9,15 +9,15 @@ class GameService {
   constructor() {
     this.SYMBOLS = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
     this.MULTIPLIERS = {
-      "grape": 20,
-      "watermelon": 3,
-      "orange": 2,
+      "grape": 100,
+      "watermelon": 5,
+      "orange": 25,
       "lemon": 5,
-      "apple": 9,
-      "banana": 2,
-      "cherry": 18,
-      "pineapple": 3,
-      "mango": 38
+      "apple": 10,
+      "banana": 5,
+      "cherry": 20,
+      "pineapple": 5,
+      "mango": 15
     };
 
     this.currentRound = {
@@ -28,8 +28,8 @@ class GameService {
       totals: this.SYMBOLS.reduce((acc, symbol) => ({ ...acc, [symbol]: 0 }), {})
     };
     this.io = null;
-    this.userIdToSocket = new Map();
-    this.userLastBets = new Map();
+    this.userIdToSocket = new Map();  // firebaseUid → socketId
+    this.userLastBets = new Map();    // firebaseUid → bet history
     this.onlineCount = 0;
     this.isProcessingRoundEnd = false;
 
@@ -52,13 +52,13 @@ class GameService {
     }
     this.dailyLoss = stats.totalHouseLoss;
     this.dailyProfit = stats.totalHouseProfit;
-    console.log(`🌀 Neon Strike Game Daily Stats Initialized: Loss: ${this.dailyLoss}, Profit: ${this.dailyProfit}`);
+    console.log(`🌀 Neon Strike Daily Stats Initialized: Loss: ${this.dailyLoss}, Profit: ${this.dailyProfit}`);
   }
 
   async checkDailyReset() {
     const today = new Date().toISOString().split('T')[0];
     if (this.currentDate !== today) {
-      console.log(`📅 Daily Reset Triggered: ${this.currentDate} -> ${today}`);
+      console.log(`📅 Daily Reset: ${this.currentDate} -> ${today}`);
       this.currentDate = today;
       this.dailyLoss = 0;
       this.dailyProfit = 0;
@@ -71,39 +71,32 @@ class GameService {
     this.startTimer();
   }
 
-  setSocketMapping(userId, socketId) {
-    this.userIdToSocket.set(userId, socketId);
+  setSocketMapping(firebaseUid, socketId) {
+    this.userIdToSocket.set(firebaseUid, socketId);
   }
 
-  removeSocketMapping(userId) {
-    this.userIdToSocket.delete(userId);
+  removeSocketMapping(firebaseUid) {
+    this.userIdToSocket.delete(firebaseUid);
   }
 
-  updateUserCache(userId, bet) {
-    let data = this.userLastBets.get(userId) || { bets: [], lastActive: Date.now() };
-
+  updateUserCache(firebaseUid, bet) {
+    let data = this.userLastBets.get(firebaseUid) || { bets: [], lastActive: Date.now() };
     data.bets.push(bet);
     if (data.bets.length > 5) data.bets.shift();
     data.lastActive = Date.now();
-
-    this.userLastBets.set(userId, data);
-
-    if (this.userLastBets.size > 10000) {
-      this.userLastBets.clear();
-    }
+    this.userLastBets.set(firebaseUid, data);
+    if (this.userLastBets.size > 10000) this.userLastBets.clear();
   }
 
   cleanupUserCache() {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
-    for (const [userId, data] of this.userLastBets.entries()) {
-      if (data.lastActive < oneHourAgo) {
-        this.userLastBets.delete(userId);
-      }
+    for (const [uid, data] of this.userLastBets.entries()) {
+      if (data.lastActive < oneHourAgo) this.userLastBets.delete(uid);
     }
   }
 
-  isUserHighRisk(userId, curAmount) {
-    const data = this.userLastBets.get(userId);
+  isUserHighRisk(firebaseUid, curAmount) {
+    const data = this.userLastBets.get(firebaseUid);
     const history = data ? data.bets : null;
     if (!history || history.length < 3) return false;
 
@@ -114,11 +107,7 @@ class GameService {
         break;
       }
     }
-
-    if (isDoubling && curAmount >= history[history.length - 1].amount * 1.8) {
-      return true;
-    }
-    return false;
+    return isDoubling && curAmount >= history[history.length - 1].amount * 1.8;
   }
 
   generateGrid(winnerSymbol) {
@@ -126,7 +115,6 @@ class GameService {
     for (let i = 0; i < 9; i++) {
       grid.push(this.SYMBOLS[Math.floor(Math.random() * this.SYMBOLS.length)]);
     }
-    // Ensure the winner is in the grid
     const randomPos = Math.floor(Math.random() * 9);
     grid[randomPos] = winnerSymbol;
     return { grid, winningCells: [randomPos] };
@@ -145,13 +133,11 @@ class GameService {
     }
 
     const totalBetAmount = Object.values(totals).reduce((a, b) => a + b, 0);
-
     if (totalBetAmount < this.HOUSE_EDGE_THRESHOLD) {
       return this.SYMBOLS[Math.floor(Math.random() * this.SYMBOLS.length)];
     }
 
     const sortedExposures = [...exposures].sort((a, b) => a.exposure - b.exposure);
-
     const rand = Math.random();
     if (rand < 0.70) return sortedExposures[0].name;
     if (rand < 0.90) return sortedExposures[1].name || sortedExposures[0].name;
@@ -172,22 +158,12 @@ class GameService {
     await RoundResult.create({ roundId: rid, winner: winnerName });
 
     if (this.io) {
-      this.io.emit('result', {
-        roundId: rid,
-        result: winnerName,
-        grid,
-        winningCells,
-        message
-      });
+      this.io.emit('result', { roundId: rid, result: winnerName, grid, winningCells, message });
 
       if (winnerName === "mango") {
         this.io.emit('JACKPOT', {
           type: "JACKPOT",
-          data: {
-            userId: "user_multi",
-            amount: 5000,
-            symbol: "mango"
-          }
+          data: { userId: "user_multi", amount: 5000, symbol: "mango" }
         });
       }
     }
@@ -198,27 +174,23 @@ class GameService {
 
     const userBetsMap = new Map();
     for (const bet of roundBets) {
-      if (!userBetsMap.has(bet.userId)) {
-        userBetsMap.set(bet.userId, []);
-      }
+      if (!userBetsMap.has(bet.userId)) userBetsMap.set(bet.userId, []);
       userBetsMap.get(bet.userId).push(bet);
     }
 
-    const userStatsPromises = Array.from(userBetsMap.entries()).map(async ([userId, bets]) => {
+    const userStatsPromises = Array.from(userBetsMap.entries()).map(async ([firebaseUid, bets]) => {
       let totalPayout = 0;
       let hasWon = false;
       const individualResults = [];
       const betUpdates = [];
 
-      // Step 1: Calculate everything in memory (FAST)
+      // Step 1: Memory mein calculate karo
       for (const bet of bets) {
         const isWinner = bet.side === winnerName;
         const multiplier = this.MULTIPLIERS[bet.side] || 0;
         let payout = isWinner ? Math.floor(bet.amount * multiplier) : 0;
 
-        if (isWinner && isJackpotRound) {
-          payout += 5000;
-        }
+        if (isWinner && isJackpotRound) payout += 5000;
 
         if (isWinner) {
           totalPayout += payout;
@@ -229,8 +201,7 @@ class GameService {
         individualResults.push({ side: bet.side, amount: bet.amount, won: isWinner, payout });
         betUpdates.push({ id: bet._id, won: isWinner, payout });
 
-        // Optimistic cache update
-        this.updateUserCache(bet.userId, {
+        this.updateUserCache(firebaseUid, {
           amount: bet.amount,
           side: bet.side,
           won: isWinner,
@@ -238,30 +209,30 @@ class GameService {
         });
       }
 
-      // Step 2: Update Balance FIRST (PRIORITY)
+      // Step 2: ✅ WePlayChat User collection mein coin update
       let updatedUser = null;
       if (totalPayout > 0) {
         updatedUser = await User.findOneAndUpdate(
-          { userId: userId },
-          { $inc: { balance: totalPayout } },
+          { firebaseUid },
+          { $inc: { coin: totalPayout } },   // ✅ coin field
           { new: true, lean: true }
         );
       } else {
-        updatedUser = await User.findOne({ userId }).select('balance').lean();
+        updatedUser = await User.findOne({ firebaseUid }).select('coin').lean();
       }
 
-      // Step 3: Emit to User IMMEDIATELY
-      const socketId = this.userIdToSocket.get(userId);
+      // Step 3: User ko result emit karo
+      const socketId = this.userIdToSocket.get(firebaseUid);
       if (socketId && this.io) {
         this.io.to(socketId).emit('betResult', {
           won: hasWon,
           totalPayout,
-          balance: updatedUser ? updatedUser.balance : 0,
+          coin: updatedUser ? updatedUser.coin : 0,   // ✅ coin
           results: individualResults
         });
       }
 
-      // Step 4: Update Bet documents in background (Non-blocking)
+      // Step 4: Bet documents background mein settle karo
       for (const b of betUpdates) {
         Bet.findByIdAndUpdate(b.id, { won: b.won, payout: b.payout, status: "settled" }).catch(() => { });
       }
@@ -276,7 +247,7 @@ class GameService {
       { $inc: { totalHouseLoss: roundHousePayout, totalHouseProfit: roundHouseRevenue } }
     );
 
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Show results for 5s
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     this.currentRound = {
       roundId: uuidv4(),
@@ -295,9 +266,7 @@ class GameService {
         this.isProcessingRoundEnd = true;
         this.processRoundEnd()
           .catch((err) => console.error("Round processing error:", err))
-          .finally(() => {
-            this.isProcessingRoundEnd = false;
-          });
+          .finally(() => { this.isProcessingRoundEnd = false; });
       }
 
       if (this.io) {
