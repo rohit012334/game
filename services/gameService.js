@@ -33,9 +33,9 @@ class GameService {
     this.onlineCount = 0;
     this.isProcessingRoundEnd = false;
 
-    this.EXPOSURE_LIMIT_PER_ROUND = 500000;
-    this.DAILY_MAX_LOSS_LIMIT = 500000;
-    this.HOUSE_EDGE_THRESHOLD = 10000;
+    this.EXPOSURE_LIMIT_PER_ROUND = 10000000000; // 1000 Crore backup for 10 Cr bets
+    this.DAILY_MAX_LOSS_LIMIT = 50000000;     // 500 Crore
+    this.HOUSE_EDGE_THRESHOLD = 700000;        // 50k coins threshold for logic
 
     this.dailyLoss = 0;
     this.dailyProfit = 0;

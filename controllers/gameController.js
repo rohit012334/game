@@ -4,7 +4,7 @@ import RoundResult from '../models/RoundResult.js';
 import gameService from '../services/gameService.js';
 
 const MIN_BET = 10;
-const MAX_BET = 10000000;
+const MAX_BET = 10000000; // 10 Crore
 const GAME_TAG = "fruit"; // ✅
 
 export const getWallet = async (req, res) => {
@@ -83,7 +83,7 @@ const processSingleBetREST = async (betItem) => {
   if (!userId) throw new Error("userId required");
   if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) throw new Error("Invalid amount");
   if (parsedAmount < MIN_BET) throw new Error("Minimum bet 10 coins");
-  if (parsedAmount > MAX_BET) throw new Error("Maximum bet 1,00,00,000 coins");
+  if (parsedAmount > MAX_BET) throw new Error("Maximum bet 10,00,00,000 coins");
 
   const currentRound = gameService.getCurrentRound();
   const validSymbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
