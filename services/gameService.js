@@ -234,7 +234,10 @@ class GameService {
 
       // Step 4: Bet documents background mein settle karo
       for (const b of betUpdates) {
-        Bet.findByIdAndUpdate(b.id, { won: b.won, payout: b.payout, status: "settled" }).catch(() => { });
+        Bet.findOneAndUpdate(
+          { _id: b.id, game: "fruit" },   // ✅
+          { won: b.won, payout: b.payout, status: "settled" }
+        ).catch(() => { });
       }
     });
 

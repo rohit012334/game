@@ -4,24 +4,20 @@ import RoundResult from '../models/RoundResult.js';
 import gameService from '../services/gameService.js';
 
 const MIN_BET = 10;
-const MAX_BET = 50000;
-
-// ✅ normalizeUserId HATAO — firebaseUid case-sensitive hota hai
-// userId param = firebaseUid (Flutter se aayega)
+const MAX_BET = 100000;
+const GAME_TAG = "fruit"; // ✅
 
 export const getWallet = async (req, res) => {
-  const { userId } = req.params; // firebaseUid
+  const { userId } = req.params;
   if (!userId) return res.status(400).json({ error: "userId required" });
   try {
     const user = await User.findOne({ firebaseUid: userId }).select('coin uniqueId name');
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({ coin: user.coin }); // ✅ coin
+    res.json({ coin: user.coin });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
 };
-
-// ❌ register REMOVED — WePlayChat handle karta hai
 
 export const getCurrentRound = (req, res) => {
   const round = gameService.getCurrentRound();
@@ -34,7 +30,7 @@ export const getCurrentRound = (req, res) => {
 };
 
 export const getHistory = async (req, res) => {
-  const { userId } = req.params; // firebaseUid
+  const { userId } = req.params;
   if (!userId) return res.status(400).json({ error: "userId required" });
 
   const page = parseInt(req.query.page) || 1;
@@ -42,7 +38,7 @@ export const getHistory = async (req, res) => {
   const skip = (page - 1) * limit;
   const statusFilter = req.query.status;
 
-  const query = { userId };
+  const query = { userId, game: GAME_TAG }; // ✅ game filter
   if (statusFilter === "pending" || statusFilter === "settled") {
     query.status = statusFilter;
   } else {
@@ -79,7 +75,7 @@ export const getHistory = async (req, res) => {
 };
 
 const processSingleBetREST = async (betItem) => {
-  const userId = betItem.userId; // firebaseUid as-is
+  const userId = betItem.userId;
   const { roundId, side, amount } = betItem;
   const selectedSymbol = side;
   const parsedAmount = Math.floor(parseInt(amount));
@@ -96,22 +92,18 @@ const processSingleBetREST = async (betItem) => {
   if (roundId !== currentRound.roundId) throw new Error("Round expired");
   if (currentRound.status !== "betting" || currentRound.time <= 1) throw new Error("Betting is closed");
 
-  // ✅ WePlayChat User collection se coin deduct
   const user = await User.findOneAndUpdate(
-    {
-      firebaseUid: userId,
-      coin: { $gte: parsedAmount },
-      isBlock: false              // ✅ Blocked user check
-    },
+    { firebaseUid: userId, coin: { $gte: parsedAmount }, isBlock: false },
     { $inc: { coin: -parsedAmount } },
-    { returnDocument: 'after' }
+    { new: true }  // ✅ { new: true } — Mongoose correct option
   );
 
   if (!user) throw new Error(`Insufficient coins or user not found for ${selectedSymbol}`);
 
   const symbolIndex = validSymbols.indexOf(selectedSymbol);
   const betData = {
-    userId,                       // firebaseUid store hoga Bet mein
+    game: GAME_TAG,  // ✅ game tag
+    userId,
     roundId,
     side: selectedSymbol,
     sideIndex: symbolIndex,
@@ -127,14 +119,8 @@ const processSingleBetREST = async (betItem) => {
 
   try {
     gameService.addBetToCache(betData);
-    return {
-      success: true,
-      message: "Bet placed!",
-      coin: user.coin,            // ✅ coin
-      side: selectedSymbol
-    };
+    return { success: true, message: "Bet placed!", coin: user.coin, side: selectedSymbol };
   } catch (cacheErr) {
-    // Rollback
     await User.findOneAndUpdate({ firebaseUid: userId }, { $inc: { coin: parsedAmount } });
     await Bet.deleteOne({ _id: newBet._id });
     throw cacheErr;
@@ -149,20 +135,16 @@ export const placeBet = async (req, res) => {
 
     for (const b of betsToProcess) {
       try {
-        const resObj = await processSingleBetREST(b);
-        results.push(resObj);
+        results.push(await processSingleBetREST(b));
       } catch (err) {
         results.push({ success: false, message: err.message, side: b.side });
       }
     }
 
     const allFailed = results.every(r => !r.success);
-    if (allFailed) {
-      return res.status(400).json({ success: false, results });
-    }
+    if (allFailed) return res.status(400).json({ success: false, results });
     res.json({ success: true, results });
   } catch (err) {
-    console.error("HTTP Bet error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

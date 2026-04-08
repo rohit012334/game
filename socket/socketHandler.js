@@ -4,7 +4,8 @@ import gameService from '../services/gameService.js';
 
 const betTimeouts = new Map();
 const MIN_BET = 10;
-const MAX_BET = 50000;
+const MAX_BET = 100000;
+const GAME_TAG = "fruit"; // ✅
 
 const symbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
 
@@ -13,7 +14,6 @@ const socketHandler = (io) => {
     gameService.onlineCount++;
     console.log("🤝 User connected:", socket.id, "| Online:", gameService.onlineCount);
 
-    // Naya connect hone wale ko current round state do
     const currentRound = gameService.getCurrentRound();
     socket.emit('round', {
       roundId: currentRound.roundId,
@@ -24,7 +24,7 @@ const socketHandler = (io) => {
     });
 
     const processSingleBet = async (betItem) => {
-      const userId = betItem.userId; // firebaseUid as-is — normalize mat karo
+      const userId = betItem.userId;
       const { roundId, side, fruit, amount } = betItem;
       const selectedSymbol = side || fruit;
       const now = Date.now();
@@ -34,11 +34,9 @@ const socketHandler = (io) => {
       const parsedAmount = Math.floor(parseInt(amount));
       if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) throw new Error("Invalid amount");
       if (parsedAmount < MIN_BET) throw new Error(`Minimum bet 10 coins for ${selectedSymbol || 'fruit'}`);
-      if (parsedAmount > MAX_BET) throw new Error(`Maximum bet 50,000 coins for ${selectedSymbol || 'fruit'}`);
+      if (parsedAmount > MAX_BET) throw new Error(`Maximum bet 1,00,000 coins for ${selectedSymbol || 'fruit'}`);
 
       const currentRound = gameService.getCurrentRound();
-
-      // ✅ Socket ko firebaseUid se map karo
       gameService.setSocketMapping(userId, socket.id);
       socket.userId = userId;
 
@@ -46,22 +44,19 @@ const socketHandler = (io) => {
       if (currentRound.roundId !== roundId) throw new Error("Round expired");
       if (currentRound.status !== "betting" || currentRound.time <= 1) throw new Error("Betting is closed");
 
-      // ✅ WePlayChat User collection se coin deduct
+      // ✅ { new: true } — Mongoose correct option
       const user = await User.findOneAndUpdate(
-        {
-          firebaseUid: userId,
-          coin: { $gte: parsedAmount },
-          isBlock: false            // ✅ Blocked user check
-        },
+        { firebaseUid: userId, coin: { $gte: parsedAmount }, isBlock: false },
         { $inc: { coin: -parsedAmount } },
-        { returnDocument: 'after' }
+        { new: true }
       );
 
       if (!user) throw new Error(`Insufficient coins or user not found for ${selectedSymbol}`);
 
       const symbolIndex = symbols.indexOf(selectedSymbol);
       const betData = {
-        userId,                     // firebaseUid
+        game: GAME_TAG,  // ✅ game tag
+        userId,
         roundId,
         side: selectedSymbol,
         sideIndex: symbolIndex,
@@ -77,14 +72,8 @@ const socketHandler = (io) => {
 
       try {
         gameService.addBetToCache(betData);
-        return {
-          message: "Bet placed!",
-          coin: user.coin,          // ✅ coin
-          side: selectedSymbol,
-          amount: parsedAmount
-        };
+        return { message: "Bet placed!", coin: user.coin, side: selectedSymbol, amount: parsedAmount };
       } catch (cacheErr) {
-        // Rollback
         await User.findOneAndUpdate({ firebaseUid: userId }, { $inc: { coin: parsedAmount } });
         await Bet.deleteOne({ _id: newBet._id });
         throw cacheErr;
@@ -101,7 +90,6 @@ const socketHandler = (io) => {
 
       try {
         const betsToProcess = Array.isArray(data) ? data : [data];
-
         for (const b of betsToProcess) {
           try {
             const result = await processSingleBet(b);
@@ -120,7 +108,7 @@ const socketHandler = (io) => {
       gameService.onlineCount = Math.max(0, gameService.onlineCount - 1);
       if (socket.userId) gameService.removeSocketMapping(socket.userId);
       betTimeouts.delete(socket.id);
-      console.log("⛵ User disconnected:", socket.id, "| Online:", gameService.onlineCount);
+      console.log("⛵ Disconnected:", socket.id, "| Online:", gameService.onlineCount);
     });
   });
 };

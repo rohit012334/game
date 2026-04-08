@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 
 const betSchema = new mongoose.Schema({
+  game: {
+    type: String,
+    default: "fruit",   // ✅ Fruit game identifier
+    index: true
+  },
   userId: { type: String, required: true },   // firebaseUid store hoga
   roundId: { type: String, required: true },
   side: { type: String, enum: ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"], required: true },
