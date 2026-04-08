@@ -155,7 +155,11 @@ class GameService {
     const roundBets = [...this.currentRound.bets];
     const rid = this.currentRound.roundId;
 
-    await RoundResult.create({ roundId: rid, winner: winnerName });
+    await RoundResult.create({
+      game: "fruit",      // ✅
+      roundId: rid,
+      winner: winnerName
+    });
 
     if (this.io) {
       this.io.emit('result', { roundId: rid, result: winnerName, grid, winningCells, message });
