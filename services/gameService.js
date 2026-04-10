@@ -189,6 +189,8 @@ class GameService {
       const individualResults = [];
       const betUpdates = [];
 
+      console.log(`👤 Processing results for user: ${firebaseUid}, total bets: ${bets.length}`);
+
       // Step 1: Memory mein calculate karo
       for (const bet of bets) {
         const isWinner = bet.side === winnerName;
@@ -223,6 +225,7 @@ class GameService {
       if (totalLostAmount > 0) incUpdate.spentCoins = totalLostAmount;
 
       if (Object.keys(incUpdate).length > 0) {
+        console.log(`💰 Updating user ${firebaseUid}:`, incUpdate);
         updatedUser = await User.findOneAndUpdate(
           { firebaseUid },
           { $inc: incUpdate },
@@ -238,7 +241,9 @@ class GameService {
         this.io.to(socketId).emit('betResult', {
           won: hasWon,
           totalPayout,
-          coin: updatedUser ? updatedUser.coin : 0,   // ✅ coin
+          coin: updatedUser ? updatedUser.coin : 0,
+          spentCoins: updatedUser ? (updatedUser.spentCoins || 0) : 0,
+          spentcoins: updatedUser ? (updatedUser.spentCoins || 0) : 0, // Lowercase alias
           results: individualResults
         });
       }

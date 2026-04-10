@@ -11,9 +11,10 @@ export const getWallet = async (req, res) => {
   const { userId } = req.params;
   if (!userId) return res.status(400).json({ error: "userId required" });
   try {
-    const user = await User.findOne({ firebaseUid: userId }).select('coin uniqueId name');
+    const user = await User.findOne({ firebaseUid: userId }).select('coin spentCoins uniqueId name');
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({ coin: user.coin });
+    const spentCoins = user.spentCoins || 0;
+    res.json({ coin: user.coin, spentCoins, spentcoins: spentCoins });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
