@@ -184,6 +184,7 @@ class GameService {
 
     const userStatsPromises = Array.from(userBetsMap.entries()).map(async ([firebaseUid, bets]) => {
       let totalPayout = 0;
+      let totalLostAmount = 0;
       let hasWon = false;
       const individualResults = [];
       const betUpdates = [];
@@ -200,6 +201,8 @@ class GameService {
           totalPayout += payout;
           hasWon = true;
           roundHousePayout += payout;
+        } else {
+          totalLostAmount += bet.amount;
         }
 
         individualResults.push({ side: bet.side, amount: bet.amount, won: isWinner, payout });
@@ -215,14 +218,18 @@ class GameService {
 
       // Step 2: ✅ WePlayChat User collection mein coin update
       let updatedUser = null;
-      if (totalPayout > 0) {
+      const incUpdate = {};
+      if (totalPayout > 0) incUpdate.coin = totalPayout;
+      if (totalLostAmount > 0) incUpdate.spentCoins = totalLostAmount;
+
+      if (Object.keys(incUpdate).length > 0) {
         updatedUser = await User.findOneAndUpdate(
           { firebaseUid },
-          { $inc: { coin: totalPayout } },   // ✅ coin field
+          { $inc: incUpdate },
           { new: true, lean: true }
         );
       } else {
-        updatedUser = await User.findOne({ firebaseUid }).select('coin').lean();
+        updatedUser = await User.findOne({ firebaseUid }).select('coin spentCoins').lean();
       }
 
       // Step 3: User ko result emit karo

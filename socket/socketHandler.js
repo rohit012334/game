@@ -4,7 +4,7 @@ import gameService from '../services/gameService.js';
 
 const betTimeouts = new Map();
 const MIN_BET = 10;
-const MAX_BET = 100000000; // 10 Crore
+const MAX_BET = 10000000;
 const GAME_TAG = "fruit"; // ✅
 
 const symbols = ["grape", "watermelon", "orange", "lemon", "apple", "banana", "cherry", "pineapple", "mango"];
@@ -34,7 +34,7 @@ const socketHandler = (io) => {
       const parsedAmount = Math.floor(parseInt(amount));
       if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) throw new Error("Invalid amount");
       if (parsedAmount < MIN_BET) throw new Error(`Minimum bet 10 coins for ${selectedSymbol || 'fruit'}`);
-      if (parsedAmount > MAX_BET) throw new Error(`Maximum bet 10,00,00,000 coins for ${selectedSymbol || 'fruit'}`);
+      if (parsedAmount > MAX_BET) throw new Error(`Maximum bet 1,00,00,000 coins for ${selectedSymbol || 'fruit'}`);
 
       const currentRound = gameService.getCurrentRound();
       gameService.setSocketMapping(userId, socket.id);
